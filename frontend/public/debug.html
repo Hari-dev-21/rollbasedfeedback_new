@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Debug Test</title>
+</head>
+<body>
+    <h1>API Debug Test</h1>
+    <button onclick="testAPI()">Test Login API</button>
+    <button onclick="testFetch()">Test Fetch API</button>
+    <div id="result"></div>
+
+    <script>
+        function testAPI() {
+            console.log('Testing API call...');
+            fetch('http://localhost:8000/api/auth/login/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',
+                body: JSON.stringify({ username: 'admin', password: 'admin123' })
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Success:', data);
+                document.getElementById('result').innerHTML = '<p style="color: green;">Success: ' + JSON.stringify(data) + '</p>';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = '<p style="color: red;">Error: ' + error.message + '</p>';
+            });
+        }
+
+        function testFetch() {
+            console.log('Testing fetch...');
+            fetch('http://localhost:8000/api/auth/user/')
+            .then(response => {
+                console.log('User API response status:', response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log('User API data:', data);
+                document.getElementById('result').innerHTML = '<p style="color: blue;">User API: ' + JSON.stringify(data) + '</p>';
+            })
+            .catch(error => {
+                console.error('User API error:', error);
+                document.getElementById('result').innerHTML = '<p style="color: red;">User API Error: ' + error.message + '</p>';
+            });
+        }
+    </script>
+</body>
+</html> 
