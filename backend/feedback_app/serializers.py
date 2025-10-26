@@ -63,10 +63,11 @@ class QuestionOptionCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True
     )
+    id = serializers.IntegerField(required=False)  # Add this for updates
     
     class Meta:
         model = QuestionOption
-        fields = ['text', 'next_section']
+        fields = ['id', 'text', 'next_section']
     
     def to_internal_value(self, data):
         # Handle string IDs for next_section
@@ -89,38 +90,30 @@ class QuestionOptionCreateSerializer(serializers.ModelSerializer):
 
 class QuestionCreateSerializer(serializers.ModelSerializer):
     option_links = QuestionOptionCreateSerializer(many=True, required=False)
+    id = serializers.IntegerField(required=False)  # Add this for updates
 
     class Meta:
         model = Question
-        fields = ['text', 'question_type', 'is_required', 'order', 'options', 'option_links']
+        fields = ['id', 'text', 'question_type', 'is_required', 'order', 'options', 'option_links', 'enable_option_navigation']
+        extra_kwargs = {
+            'enable_option_navigation': {'required': False, 'default': False}
+        }
+
 
 class SectionCreateSerializer(serializers.ModelSerializer):
     questions = QuestionCreateSerializer(many=True)
-    id = serializers.IntegerField(read_only=True)
+    id = serializers.IntegerField(required=False)  # Change from read_only to allow updates
 
     class Meta:
         model = Section
-        fields = ['id', 'title', 'description', 'order', 'questions']
-
-
-# class FeedbackFormSerializer(serializers.ModelSerializer):
-#     questions = QuestionCreateSerializer(many=True, read_only=True)
-#     response_count = serializers.ReadOnlyField()
-#     shareable_link = serializers.ReadOnlyField()
-#     is_expired = serializers.ReadOnlyField()
-    
-#     class Meta:
-#         model = FeedbackForm
-#         fields = [
-#             'id', 'title', 'description', 'form_type', 'created_by', 
-#             'created_at', 'updated_at', 'is_active', 'expires_at',
-#             'questions', 'response_count', 'shareable_link', 'is_expired'
-#         ]
-#         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
+        fields = ['id', 'title', 'description', 'order', 'next_section_on_submit', 'questions']
+        extra_kwargs = {
+            'next_section_on_submit': {'required': False, 'allow_null': True}
+        }
 
 
 class FeedbackFormSerializer(serializers.ModelSerializer):
-    questions = serializers.SerializerMethodField()  # Add this
+    questions = serializers.SerializerMethodField()
     sections = SectionCreateSerializer(many=True, read_only=True)
     response_count = serializers.ReadOnlyField()
     shareable_link = serializers.ReadOnlyField()
@@ -131,7 +124,7 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'form_type', 'created_by', 
             'created_at', 'updated_at', 'is_active', 'expires_at',
-            'questions', 'sections', 'response_count', 'shareable_link', 'is_expired'  # Include both
+            'questions', 'sections', 'response_count', 'shareable_link', 'is_expired'
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at']
 
@@ -145,7 +138,7 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
                     'text': question.text,
                     'question_type': question.question_type,
                     'is_required': question.is_required,
-                    'options': question.options or [],  # Ensure options is never null
+                    'options': question.options or [],
                     'order': question.order,
                     'section_id': section.id
                 })
@@ -153,8 +146,7 @@ class FeedbackFormSerializer(serializers.ModelSerializer):
 
 
 class FeedbackFormCreateSerializer(serializers.ModelSerializer):
-    sections = SectionCreateSerializer(many=True)  # ✅ Accept sections from frontend
-    # id = serializers.IntegerField(read_only=True)
+    sections = SectionCreateSerializer(many=True)
 
     class Meta:
         model = FeedbackForm
@@ -176,7 +168,8 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
                 form=form,
                 title=section_data.get('title', ''),
                 description=section_data.get('description', ''),
-                order=section_data.get('order', 0)
+                order=section_data.get('order', 0),
+                next_section_on_submit=section_data.get('next_section_on_submit')
             )
             
             # Create questions for this section
@@ -189,7 +182,8 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
                     question_type=question_data.get('question_type', 'text'),
                     is_required=question_data.get('is_required', False),
                     order=question_data.get('order', 0),
-                    options=question_data.get('options', [])
+                    options=question_data.get('options', []),
+                    enable_option_navigation=question_data.get('enable_option_navigation', False)
                 )
                 
                 # Create option links for navigation
@@ -215,6 +209,147 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
                     )
 
         return form
+
+    def update(self, instance, validated_data):
+        sections_data = validated_data.pop('sections', [])
+        
+        # Update the main form fields
+        instance.title = validated_data.get('title', instance.title)
+        instance.description = validated_data.get('description', instance.description)
+        instance.form_type = validated_data.get('form_type', instance.form_type)
+        instance.is_active = validated_data.get('is_active', instance.is_active)
+        instance.expires_at = validated_data.get('expires_at', instance.expires_at)
+        instance.save()
+        
+        # Handle sections and questions updates
+        if sections_data:
+            self.update_sections(instance, sections_data)
+        
+        return instance
+    
+    def update_sections(self, form_instance, sections_data):
+        # Get existing sections
+        existing_sections = {str(section.id): section for section in form_instance.sections.all()}
+        existing_section_ids = set(existing_sections.keys())
+        updated_section_ids = set()
+        
+        # Update or create sections
+        for section_data in sections_data:
+            section_id = section_data.get('id')
+            
+            if section_id and section_id in existing_sections:
+                # Update existing section
+                section = existing_sections[section_id]
+                section.title = section_data.get('title', section.title)
+                section.description = section_data.get('description', section.description)
+                section.order = section_data.get('order', section.order)
+                section.next_section_on_submit = section_data.get('next_section_on_submit', section.next_section_on_submit)
+                section.save()
+                
+                # Update questions for this section
+                self.update_questions(section, section_data.get('questions', []))
+                updated_section_ids.add(section_id)
+            else:
+                # Create new section
+                section = Section.objects.create(
+                    form=form_instance,
+                    title=section_data.get('title', ''),
+                    description=section_data.get('description', ''),
+                    order=section_data.get('order', 0),
+                    next_section_on_submit=section_data.get('next_section_on_submit')
+                )
+                # Create questions for new section
+                self.update_questions(section, section_data.get('questions', []))
+        
+        # Delete sections that were removed
+        sections_to_delete = existing_section_ids - updated_section_ids
+        if sections_to_delete:
+            form_instance.sections.filter(id__in=sections_to_delete).delete()
+    
+    def update_questions(self, section_instance, questions_data):
+        # Get existing questions
+        existing_questions = {str(question.id): question for question in section_instance.questions.all()}
+        existing_question_ids = set(existing_questions.keys())
+        updated_question_ids = set()
+        
+        # Update or create questions
+        for question_data in questions_data:
+            question_id = question_data.get('id')
+            
+            if question_id and question_id in existing_questions:
+                # Update existing question
+                question = existing_questions[question_id]
+                question.text = question_data.get('text', question.text)
+                question.question_type = question_data.get('question_type', question.question_type)
+                question.is_required = question_data.get('is_required', question.is_required)
+                question.order = question_data.get('order', question.order)
+                question.options = question_data.get('options', question.options)
+                question.enable_option_navigation = question_data.get('enable_option_navigation', question.enable_option_navigation)
+                question.save()
+                
+                # Update option links
+                self.update_option_links(question, question_data.get('option_links', []))
+                updated_question_ids.add(question_id)
+            else:
+                # Create new question
+                question = Question.objects.create(
+                    section=section_instance,
+                    text=question_data.get('text', ''),
+                    question_type=question_data.get('question_type', 'text'),
+                    is_required=question_data.get('is_required', False),
+                    order=question_data.get('order', 0),
+                    options=question_data.get('options', []),
+                    enable_option_navigation=question_data.get('enable_option_navigation', False)
+                )
+                # Create option links for new question
+                self.update_option_links(question, question_data.get('option_links', []))
+        
+        # Delete questions that were removed
+        questions_to_delete = existing_question_ids - updated_question_ids
+        if questions_to_delete:
+            section_instance.questions.filter(id__in=questions_to_delete).delete()
+    
+    def update_option_links(self, question_instance, option_links_data):
+        # Get existing option links
+        existing_option_links = {str(link.id): link for link in question_instance.option_links.all()}
+        existing_option_link_ids = set(existing_option_links.keys())
+        updated_option_link_ids = set()
+        
+        # Update or create option links
+        for option_link_data in option_links_data:
+            option_link_id = option_link_data.get('id')
+            next_section_id = option_link_data.get('next_section')
+            next_section = None
+            
+            # Find the target section if provided
+            if next_section_id:
+                try:
+                    next_section = Section.objects.get(
+                        id=next_section_id, 
+                        form=question_instance.section.form
+                    )
+                except Section.DoesNotExist:
+                    next_section = None
+            
+            if option_link_id and option_link_id in existing_option_links:
+                # Update existing option link
+                option_link = existing_option_links[option_link_id]
+                option_link.text = option_link_data.get('text', option_link.text)
+                option_link.next_section = next_section
+                option_link.save()
+                updated_option_link_ids.add(option_link_id)
+            else:
+                # Create new option link
+                QuestionOption.objects.create(
+                    question=question_instance,
+                    text=option_link_data.get('text', ''),
+                    next_section=next_section
+                )
+        
+        # Delete option links that were removed
+        option_links_to_delete = existing_option_link_ids - updated_option_link_ids
+        if option_links_to_delete:
+            question_instance.option_links.filter(id__in=option_links_to_delete).delete()
 
 
 # ------------------- Response Serializers -------------------
@@ -304,8 +439,12 @@ class QuestionAnalyticsSerializer(serializers.Serializer):
     response_count = serializers.IntegerField()
     average_rating = serializers.FloatField(allow_null=True)
     answer_distribution = serializers.DictField()
-    options = serializers.ListField(child=serializers.CharField(), required=False)
-
+    options = serializers.ListField(
+        child=serializers.CharField(), 
+        required=False, 
+        allow_empty=True,
+        default=list  # Add this default
+    )
 
 class FormSummarySerializer(serializers.Serializer):
     total_forms = serializers.IntegerField()

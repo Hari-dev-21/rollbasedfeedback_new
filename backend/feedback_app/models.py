@@ -58,48 +58,56 @@ class FeedbackForm(models.Model):
 # ------------------------
 # Section Model
 # ------------------------
+# In your models.py, add this field to the Section model
 class Section(models.Model):
     form = models.ForeignKey(FeedbackForm, on_delete=models.CASCADE, related_name='sections')
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    order = models.PositiveIntegerField(default=0)
-    next_section = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL)
-
+    order = models.IntegerField(default=0)
+    next_section_on_submit = models.ForeignKey(
+        'self', 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='previous_sections'
+    )  # Add this field
+    
     class Meta:
         ordering = ['order']
-
+    
     def __str__(self):
-        return f"{self.form.title} - {self.title}"
-
+        return f"{self.title} (Form: {self.form.title})"
 
 # ------------------------
 # Question Model
 # ------------------------
+# In your models.py, add this field to the Question model
 class Question(models.Model):
     QUESTION_TYPES = [
         ('text', 'Text Input'),
         ('textarea', 'Long Text'),
         ('radio', 'Single Choice'),
+        ('dropdown', 'Single Choice (Dropdown)'),
         ('checkbox', 'Multiple Choice'),
-        ('rating', 'Rating (1-5)'),
-        ('rating_10', 'Rating (1-10)'),
-        ('yes_no', 'Yes/No'),
         ('email', 'Email'),
         ('phone', 'Phone Number'),
+        ('rating', 'Rating'),
+        ('yes_no', 'Yes or No'),
     ]
-
-    section = models.ForeignKey(Section, on_delete=models.CASCADE,  null=True,   blank=True, related_name='questions')
+    
+    section = models.ForeignKey(Section, on_delete=models.CASCADE, related_name='questions', null= True, blank=True)
     text = models.CharField(max_length=500)
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPES)
-    is_required = models.BooleanField(default=True)
-    order = models.PositiveIntegerField(default=0)
-    options = models.JSONField(default=list, blank=True)  # For radio/checkbox questions
-
+    is_required = models.BooleanField(default=False)
+    order = models.IntegerField(default=0)
+    options = models.JSONField(blank=True, null=True)
+    enable_option_navigation = models.BooleanField(default=False)  # Add this field
+    
     class Meta:
         ordering = ['order']
-
+    
     def __str__(self):
-        return f"{self.section.title} - {self.text[:50]}"
+        return f"{self.text} ({self.question_type})"
 
 
 class QuestionOption(models.Model):
@@ -173,21 +181,27 @@ class FormAnalytics(models.Model):
         self.average_rating = 0.0
         self.questions_summary = {}
 
-        if self.total_responses > 0:
+        # 🔥 FIX: Calculate total questions through sections
+        total_questions = 0
+        all_questions = []
+        for section in self.form.sections.all():
+            section_questions = section.questions.all()
+            total_questions += section_questions.count()
+            all_questions.extend(section_questions)
+
+        if self.total_responses > 0 and total_questions > 0:
             # Completion rate
-            total_questions = self.form.questions.count()
-            if total_questions > 0:
-                completed_responses = responses.annotate(answer_count=Count('answers')).filter(answer_count=total_questions).count()
-                self.completion_rate = (completed_responses / self.total_responses) * 100
+            completed_responses = responses.annotate(answer_count=Count('answers')).filter(answer_count=total_questions).count()
+            self.completion_rate = (completed_responses / self.total_responses) * 100
 
             # Average rating
             rating_answers = Answer.objects.filter(response__form=self.form, question__question_type__in=['rating', 'rating_10'])
-            valid_ratings = [float(a.answer_text) for a in rating_answers if a.answer_text.isdigit()]
+            valid_ratings = [float(a.answer_text) for a in rating_answers if a.answer_text and a.answer_text.isdigit()]
             if valid_ratings:
                 self.average_rating = sum(valid_ratings) / len(valid_ratings)
 
             # Per-question aggregation
-            for question in self.form.questions.all():
+            for question in all_questions:  # 🔥 Use the collected questions
                 q_type = question.question_type
                 answers = Answer.objects.filter(question=question)
                 
@@ -196,7 +210,8 @@ class FormAnalytics(models.Model):
                     self.questions_summary[str(question.id)] = counts
                 
                 elif q_type in ['rating', 'rating_10']:
-                    self.questions_summary[str(question.id)] = [float(a.answer_text) for a in answers if a.answer_text.isdigit()]
+                    ratings = [float(a.answer_text) for a in answers if a.answer_text and a.answer_text.isdigit()]
+                    self.questions_summary[str(question.id)] = ratings
                 
                 elif q_type in ['text', 'textarea']:
                     self.questions_summary[str(question.id)] = [a.answer_text for a in answers]

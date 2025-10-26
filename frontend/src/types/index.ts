@@ -14,7 +14,7 @@ export interface CreateQuestionData {
 export interface Question {
   id: number;
   text: string;
-  question_type: 'text' | 'textarea' | 'radio' | 'checkbox' | 'rating' | 'rating_10' | 'yes_no' | 'email' | 'phone';
+  question_type: 'text' | 'textarea' | 'radio' | 'checkbox' | 'rating' |'dropdown' | 'rating_10' | 'yes_no' | 'email' | 'phone';
   is_required: boolean;
   order: number;
   options: string[];
@@ -31,9 +31,19 @@ export interface FeedbackForm {
   is_active: boolean;
   expires_at: string | null;
   questions: Question[];
+  sections?: Section[];
   response_count: number;
   shareable_link: string;
   is_expired: boolean;
+}
+
+export interface Section {
+  id: string;
+  title: string;
+  description: string;
+  order: number;
+  questions: Question[];
+  next_section_on_submit?: string | null;
 }
 
 export interface Answer {

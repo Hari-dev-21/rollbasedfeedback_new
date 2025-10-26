@@ -1466,146 +1466,114 @@ class FeedbackFormViewSet(viewsets.ModelViewSet):
             )
         
 
-
-
-      # @action(detail=True, methods=['get'])
-    # def analytics(self, request, pk=None):
-    #     """
-    #     Get overall analytics for a specific form
-    #     Includes total responses, completion rate, average rating,
-    #     and questions_summary.
-    #     """
-    #     try:
-    #         form = self.get_object()
-    #         analytics, _ = FormAnalytics.objects.get_or_create(form=form)
-    #         analytics.update_analytics()
-
-    #         serializer = FormAnalyticsSerializer(analytics)
-    #         return Response(serializer.data, status=status.HTTP_200_OK)
-    #     except Exception as e:
-    #         return Response(
-    #             {"error": f"Unable to load analytics: {str(e)}"},
-    #             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-    #         )
+    
     @action(detail=True, methods=['get'])
     def question_analytics(self, request, pk=None):
-            """
-            Get analytics for individual questions of a form
-            Returns average rating, option distribution, etc.
-            """
-            try:
-                form = self.get_object()
-                questions = form.questions.all()
+    
+        try:
+            form = self.get_object()
 
-                question_analytics = []
-                for question in questions:
-                    answers = Answer.objects.filter(question=question)
-                    response_count = answers.count()
-                    analytics_data = {
-                        "question_id": question.id,
-                        "question_text": question.text,
-                        "question_type": question.question_type,
-                        "response_count": response_count,
-                        "average_rating": None,
-                        "answer_distribution": {},
-                        "options": question.options or []
-                    }
+            # Get section filter from query params
+            section_id = request.GET.get('section_id')
 
-                    if question.question_type in ["rating", "rating_10"]:
-                        max_rating = 10 if question.question_type == "rating_10" else 5
+            # Build query for questions
+            questions_query = Question.objects.filter(section__form=form)
+
+            # Apply section filter if provided
+            if section_id:
+                questions_query = questions_query.filter(section_id=section_id)
+
+            questions = questions_query.select_related('section')
+
+            # Get all sections for the dropdown
+            sections = Section.objects.filter(form=form).values('id', 'title', 'order')
+
+            question_analytics = []
+            for question in questions:
+                answers = Answer.objects.filter(question=question)
+                response_count = answers.count()
+
+                # Safe options handling
+                options_list = []
+                if question.options is not None:
+                    if isinstance(question.options, list):
+                        options_list = question.options
+                    else:
+                        try:
+                            options_list = list(question.options) if hasattr(question.options, '__iter__') else []
+                        except:
+                            options_list = []
+
+                analytics_data = {
+                    "question_id": question.id,
+                    "question_text": question.text,
+                    "question_type": question.question_type,
+                    "response_count": response_count,
+                    "average_rating": None,
+                    "answer_distribution": {},
+                    "options": options_list,
+                    "section_id": question.section.id,
+                    "section_title": question.section.title,
+                }
+
+                # Handle analytics by question type
+                if question.question_type == "rating":
+                    total = 0
+                    for answer in answers:
+                        try:
+                            total += int(answer.answer_text)
+                        except ValueError:
+                            pass
+                    analytics_data["average_rating"] = round(total / response_count, 2) if response_count else None
+
+                elif question.question_type in ["radio", "checkbox", "dropdown"]:  # ✅ Dropdown included here
+                    if question.question_type == "checkbox":
                         distribution = {}
-                        for i in range(1, max_rating + 1):
-                            count = answers.filter(answer_text=str(i)).count()
-                            distribution[str(i)] = count
+                        for answer in answers:
+                            options = [opt.strip() for opt in answer.answer_text.split(",") if opt.strip()]
+                            for option in options:
+                                distribution[option] = distribution.get(option, 0) + 1
                         analytics_data["answer_distribution"] = distribution
 
-                        # Calculate average rating
-                        avg = answers.filter(answer_text__regex=r"^\d+$").aggregate(avg=Avg("answer_text"))["avg"]
-                        analytics_data["average_rating"] = float(avg) if avg else None
+                    elif question.question_type == "dropdown":
+                        # ✅ Dropdown logic - single selection
+                        distribution = {opt: 0 for opt in options_list}
+                        for answer in answers:
+                            answer_text = answer.answer_text.strip()
+                            if answer_text in distribution:
+                                distribution[answer_text] += 1
+                            else:
+                                distribution[answer_text] = distribution.get(answer_text, 0) + 1
+                        analytics_data["answer_distribution"] = distribution
 
-                    elif question.question_type in ["radio", "checkbox"]:
-                        if question.question_type == "checkbox":
-                            distribution = {}
-                            for answer in answers:
-                                options = [opt.strip() for opt in answer.answer_text.split(",") if opt.strip()]
-                                for option in options:
-                                    distribution[option] = distribution.get(option, 0) + 1
-                            analytics_data["answer_distribution"] = distribution
-                        else:
-                            # ✅ ADDED: Radio button logic
-                            distribution = {}
-                            # Initialize with all options set to 0
-                            for option in question.options:
-                                distribution[option] = 0
-                            
-                            # Count actual responses
-                            for answer in answers:
-                                answer_text = answer.answer_text.strip()
-                                if answer_text in distribution:
-                                    distribution[answer_text] += 1
-                                else:
-                                    # Handle case where answer doesn't match any option
-                                    distribution[answer_text] = distribution.get(answer_text, 0) + 1
-                            
-                            analytics_data["answer_distribution"] = distribution
+                    else:  # Radio button logic
+                        distribution = {opt: 0 for opt in options_list}
+                        for answer in answers:
+                            answer_text = answer.answer_text.strip()
+                            if answer_text in distribution:
+                                distribution[answer_text] += 1
+                            else:
+                                distribution[answer_text] = distribution.get(answer_text, 0) + 1
+                        analytics_data["answer_distribution"] = distribution
 
-                    elif question.question_type in ["text", "textarea", "email", "phone"]:
-                                # Collect individual responses
-                                text_responses = list(
-                                    answers.values_list("answer_text", flat=True)
-                                )
-                                analytics_data["responses"] = text_responses  
+                # Add this question's analytics
+                question_analytics.append(analytics_data)
 
-                    elif question.question_type == "yes_no":
-                            distribution = (
-                                answers.values("answer_text")
-                                .annotate(count=Count("answer_text"))
-                                .order_by("-count")
-                            )
+            return Response({
+                "sections": list(sections),
+                "questions": question_analytics,
+                "selected_section": section_id
+            }, status=status.HTTP_200_OK)
 
-                            # Always include both keys to avoid empty chart
-                            normalized_distribution = {"Yes": 0, "No": 0}
+        except Exception as e:
+            print(f"Analytics error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": f"Unable to load question analytics: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
-                            for item in distribution:
-                                value = item["answer_text"]
-                                count = item["count"]
-
-                                if value is None:
-                                    continue
-
-                                raw_value = str(value).strip().lower()
-
-                                # Normalize different formats
-                                if raw_value in ["true", "yes", "y", "1"]:
-                                    normalized_distribution["Yes"] += count
-                                elif raw_value in ["false", "no", "n", "0"]:
-                                    normalized_distribution["No"] += count
-                                else:
-                                    print(f"⚠️ Unexpected yes/no value: {value}")
-
-                            # Fallback if somehow still empty
-                            if not any(normalized_distribution.values()):
-                                normalized_distribution = {"Yes": 0, "No": 0}
-
-                            analytics_data["answer_distribution"] = normalized_distribution
-
-        
-                    else:
-                            distribution = answers.values("answer_text").annotate(
-                                count=Count("answer_text")
-                            ).order_by("-count")
-                            analytics_data["answer_distribution"] = {
-                                item["answer_text"]: item["count"] for item in distribution
-                            }
-
-                    question_analytics.append(analytics_data)
-
-                return Response(question_analytics, status=status.HTTP_200_OK)
-            except Exception as e:
-                return Response(
-                    {"error": f"Unable to load question analytics: {str(e)}"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
 
 class PublicFormsListView(APIView):
     """Public view for listing all active feedback forms"""
@@ -1640,7 +1608,21 @@ class PublicFeedbackFormView(APIView):
                     status=status.HTTP_410_GONE
                 )
             
+            # DEBUG: Check database state
+            print("🔍 DATABASE DEBUG - Form:", form.title)
+            print("🔍 DATABASE DEBUG - Sections:", form.sections.count())
+            for section in form.sections.all():
+                print(f"🔍 DATABASE DEBUG - Section {section.id}: '{section.title}'")
+                for question in section.questions.all():
+                    print(f"🔍 DATABASE DEBUG - Question {question.id}: '{question.text}'")
+            
             serializer = FeedbackFormSerializer(form)
+            
+            # DEBUG: Check serialized data
+            print("🔍 SERIALIZED DEBUG - Questions:", len(serializer.data.get('questions', [])))
+            for q in serializer.data.get('questions', []):
+                print(f"🔍 SERIALIZED DEBUG - Q{q['id']}: '{q['text']}'")
+            
             return Response(serializer.data)
         
         except FeedbackForm.DoesNotExist:
@@ -1661,13 +1643,60 @@ class PublicFeedbackFormView(APIView):
                     status=status.HTTP_410_GONE
                 )
             
-            # Validate that all required questions are answered
-            required_questions = form.questions.filter(is_required=True)
-            submitted_answers = request.data.get('answers', [])
+            # 🔥 FIX: Get all required questions from all sections
+            required_questions = []
+            form_question_ids = []
             
-            if len(submitted_answers) < required_questions.count():
+            for section in form.sections.all():
+                section_required = section.questions.filter(is_required=True)
+                required_questions.extend(section_required)
+                
+                # Also collect all question IDs for validation
+                section_questions = section.questions.all()
+                form_question_ids.extend([q.id for q in section_questions])
+            
+            print(f"🔍 DEBUG: Found {len(required_questions)} required questions")
+            print(f"🔍 DEBUG: Form has {len(form_question_ids)} total questions")
+            
+            submitted_answers = request.data.get('answers', [])
+            submitted_question_ids = [answer['question'] for answer in submitted_answers]
+            
+            print(f"🔍 DEBUG: Received {len(submitted_answers)} answers")
+            print(f"🔍 DEBUG: Submitted question IDs: {submitted_question_ids}")
+            
+            # Validate that all required questions are answered
+            missing_required = []
+            for question in required_questions:
+                if question.id not in submitted_question_ids:
+                    missing_required.append({
+                        'question_id': question.id,
+                        'question_text': question.text
+                    })
+                    print(f"❌ MISSING REQUIRED: Q{question.id} - '{question.text}'")
+            
+            if missing_required:
                 return Response(
-                    {'error': 'Please answer all required questions'}, 
+                    {
+                        'error': 'Missing required questions',
+                        'missing_questions': missing_required
+                    }, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate that all submitted questions exist in this form
+            invalid_questions = []
+            for answer in submitted_answers:
+                question_id = answer.get('question')
+                if question_id not in form_question_ids:
+                    invalid_questions.append(question_id)
+                    print(f"❌ INVALID QUESTION: {question_id}")
+            
+            if invalid_questions:
+                return Response(
+                    {
+                        'error': 'Invalid questions submitted',
+                        'invalid_questions': invalid_questions
+                    }, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
@@ -1714,19 +1743,29 @@ class PublicFeedbackFormView(APIView):
                     }
                 )
                 
+                print(f"✅ SUCCESS: Response {response.id} submitted successfully")
                 return Response({
                     'message': 'Feedback submitted successfully',
                     'response_id': str(response.id)
                 }, status=status.HTTP_201_CREATED)
             
+            print(f"❌ SERIALIZER ERRORS: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         except FeedbackForm.DoesNotExist:
+            print(f"❌ FORM NOT FOUND: {form_id}")
             return Response(
                 {'error': 'Form not found'}, 
                 status=status.HTTP_404_NOT_FOUND
             )
-
+        except Exception as e:
+            print(f"💥 ERROR in PublicFeedbackFormView: {str(e)}")
+            import traceback
+            print(f"💥 TRACEBACK: {traceback.format_exc()}")
+            return Response(
+                {'error': 'Internal server error'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 class FeedbackResponseViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing feedback responses"""
     serializer_class = FeedbackResponseSerializer

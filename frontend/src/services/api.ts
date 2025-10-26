@@ -155,14 +155,27 @@ export const formsAPI = {
   },
   
   // Get question analytics - WITH BETTER ERROR HANDLING
-  getQuestionAnalytics: async (id: string): Promise<QuestionAnalytics[]> => {
+  getQuestionAnalytics: async (formId: string, sectionId?: string) => {
     try {
-      const response = await api.get(`/api/forms/${id}/question_analytics/`);
+      const params: any = {};
+      if (sectionId) {
+        params.section_id = sectionId;
+      }
+      
+      // ✅ FIX: Add /api/ prefix to match your other endpoints
+      const response = await api.get(`/api/forms/${formId}/question_analytics/`, { params });
       return response.data;
     } catch (error: any) {
-      console.error(`Failed to load question analytics for form ${id}:`, error);
-      // Return empty array instead of throwing
-      return [];
+      console.error('Failed to load question analytics:', error);
+      
+      // Enhanced error handling
+      if (error.response?.status === 404) {
+        console.error(`Question analytics endpoint not found for form ${formId}`);
+        // Return empty array as fallback
+        return [];
+      }
+      
+      throw error;
     }
   },
   
@@ -186,16 +199,18 @@ export const publicFeedbackAPI = {
     return response.data;
   },
   
-  // Get form for public access
-  // In your api.ts - Update the publicFeedbackAPI.getPublicForm method
+// In your api.ts getPublicForm method
+// In your api.ts getPublicForm method - fix the return issue
 getPublicForm: async (formId: string): Promise<FeedbackForm> => {
   try {
     console.log(`🔍 Fetching public form: ${formId}`);
     
-    // Use the correct endpoint with form_id parameter name
     const response = await api.get(`/api/public/feedback/${formId}/`);
     
-    console.log('✅ Public form loaded successfully:', response.data);
+    console.log('📦 RAW API RESPONSE:', response);
+    console.log('📦 Response data:', response.data);
+    console.log('📦 Response sections:', response.data.sections);
+    
     return response.data;
   } catch (error: any) {
     console.error(`❌ Failed to load public form ${formId}:`, error);
@@ -203,7 +218,6 @@ getPublicForm: async (formId: string): Promise<FeedbackForm> => {
     if (error.response?.status === 404) {
       throw new Error('Form not found or is not publicly accessible');
     } else if (error.response?.status === 500) {
-      // Log the actual server error details
       console.error('Server error details:', error.response?.data);
       throw new Error('Server error occurred. Please try again later.');
     } else if (error.response?.data?.error) {
@@ -214,11 +228,39 @@ getPublicForm: async (formId: string): Promise<FeedbackForm> => {
   }
 },
   
-  // Submit feedback response
-  submitFeedback: async (formId: string, data: SubmitFeedbackData): Promise<{ message: string; response_id: string }> => {
+  // Submit feedback response - FIXED URL
+ // In your api.ts submitFeedback method
+submitFeedback: async (formId: string, data: any): Promise<any> => {
+  try {
+    console.log('🚀 Sending feedback submission:');
+    console.log('URL:', `/api/public/feedback/${formId}/`);
+    console.log('Data:', JSON.stringify(data, null, 2));
+    
     const response = await api.post(`/api/public/feedback/${formId}/`, data);
+    console.log('✅ Feedback submitted successfully:', response.data);
     return response.data;
-  },
+  } catch (error: any) {
+    console.error('❌ Error submitting feedback:');
+    console.error('Error response:', error.response?.data);
+    console.error('Error status:', error.response?.status);
+    
+    // Enhanced error logging - show the actual missing question IDs
+    if (error.response?.data?.missing_questions) {
+      console.error('🔍 Missing questions details:', error.response.data.missing_questions);
+      console.error('📋 Missing question IDs:', error.response.data.missing_questions.map((mq: any) => mq.question_id || mq.id || mq));
+    }
+    
+    // Create a better error message with the missing question details
+    if (error.response?.data?.missing_questions) {
+      const missingQuestionIds = error.response.data.missing_questions.map((mq: any) => mq.question_id || mq.id || mq);
+      const enhancedError = new Error(`Missing required questions: ${JSON.stringify(missingQuestionIds)}`);
+      enhancedError.cause = error;
+      throw enhancedError;
+    }
+    
+    throw error;
+  }
+},
   
   // Get public response details
   getPublicResponse: async (responseId: string): Promise<FeedbackResponse> => {
