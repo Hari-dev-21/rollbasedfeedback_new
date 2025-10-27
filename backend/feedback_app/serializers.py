@@ -57,7 +57,6 @@ class AdminSerializers(serializers.ModelSerializer):
         return instance
 
 # ------------------- Form Structure -------------------
-class QuestionOptionCreateSerializer(serializers.ModelSerializer):
     next_section = serializers.PrimaryKeyRelatedField(
         queryset=Section.objects.all(),
         required=False,
@@ -87,7 +86,44 @@ class QuestionOptionCreateSerializer(serializers.ModelSerializer):
         
         return super().to_internal_value(data)
 
-
+class QuestionOptionCreateSerializer(serializers.ModelSerializer):
+    next_section = serializers.CharField(  # Change from PrimaryKeyRelatedField to CharField
+        required=False, 
+        allow_null=True, 
+        allow_blank=True
+    )
+    id = serializers.IntegerField(required=False)
+    
+    class Meta:
+        model = QuestionOption
+        fields = ['id', 'text', 'next_section']
+    
+    def to_internal_value(self, data):
+        # Don't try to lookup sections during validation - just pass through the frontend_id
+        # The main create method will handle the section mapping
+        next_section_value = data.get('next_section')
+        
+        print(f"🔧 DEBUG to_internal_value: Passing through next_section value: {next_section_value}")
+        
+        # Just return the data as-is - don't try to convert to Section objects
+        # The main create method will handle the mapping
+        return super().to_internal_value(data)
+    
+    def to_representation(self, instance):
+        """Custom representation to return frontend_id instead of database ID"""
+        representation = super().to_representation(instance)
+        
+        print(f"🔧 DEBUG to_representation: Option '{instance.text}', next_section object: {instance.next_section}")
+        
+        # Return the frontend_id of the next_section instead of database ID
+        if instance.next_section and hasattr(instance.next_section, 'frontend_id'):
+            representation['next_section'] = instance.next_section.frontend_id
+            print(f"🔧 DEBUG to_representation: Returning frontend_id: {instance.next_section.frontend_id}")
+        else:
+            representation['next_section'] = None
+            print(f"🔧 DEBUG to_representation: Returning None for next_section")
+            
+        return representation
 class QuestionCreateSerializer(serializers.ModelSerializer):
     option_links = QuestionOptionCreateSerializer(many=True, required=False)
     id = serializers.IntegerField(required=False)  # Add this for updates
@@ -167,6 +203,9 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
         sections_data = validated_data.pop('sections', [])
         validated_data['created_by'] = self.context['request'].user
         
+        print("🔧 DEBUG: Starting form creation")
+        print(f"🔧 DEBUG: Number of sections: {len(sections_data)}")
+        
         # Create the form first
         form = FeedbackForm.objects.create(**validated_data)
 
@@ -175,25 +214,30 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
         
         # First pass: create all sections with frontend IDs
         for section_data in sections_data:
-            questions_data = section_data.pop('questions', [])
             frontend_section_id = section_data.get('frontend_id')
+            print(f"🔧 DEBUG: Creating section with frontend_id: {frontend_section_id}")
+            
+            questions_data = section_data.pop('questions', [])
             
             # Create the section with frontend ID
             section = Section.objects.create(
                 form=form,
-                frontend_id=frontend_section_id,  # Store frontend ID
+                frontend_id=frontend_section_id,
                 title=section_data.get('title', ''),
                 description=section_data.get('description', ''),
                 order=section_data.get('order', 0),
-                next_section_on_submit=None  # Set to None initially
+                next_section_on_submit=None
             )
             
             # Store mapping for navigation resolution
             if frontend_section_id:
                 section_frontend_id_mapping[frontend_section_id] = section
+                print(f"🔧 DEBUG: Mapped {frontend_section_id} -> section ID {section.id}")
             
             # Store questions data for second pass
             section._questions_data = questions_data
+
+        print(f"🔧 DEBUG: Section mapping: {list(section_frontend_id_mapping.keys())}")
 
         # Second pass: handle navigation and create questions
         for section_data in sections_data:
@@ -208,50 +252,72 @@ class FeedbackFormCreateSerializer(serializers.ModelSerializer):
             # Handle section-level navigation
             next_section_frontend_id = section_data.get('next_section_on_submit')
             if next_section_frontend_id:
-                # Look up the target section using frontend ID mapping
                 target_section = section_frontend_id_mapping.get(next_section_frontend_id)
+                print(f"🔧 DEBUG: Section {frontend_section_id} -> next_section: {next_section_frontend_id} (found: {target_section is not None})")
                 if target_section:
                     section.next_section_on_submit = target_section
                     section.save()
             
             # Create questions for this section
             questions_data = getattr(section, '_questions_data', [])
+            print(f"🔧 DEBUG: Processing {len(questions_data)} questions for section {frontend_section_id}")
+            
             for question_data in questions_data:
-                option_links_data = question_data.pop('option_links', [])
-                enable_option_navigation = question_data.get('enable_option_navigation', False)
-                question_frontend_id = question_data.get('frontend_id')
+                # Make a copy of question_data to avoid modifying the original
+                question_data_copy = question_data.copy()
+                option_links_data = question_data_copy.pop('option_links', [])
+                enable_option_navigation = question_data_copy.get('enable_option_navigation', False)
+                question_frontend_id = question_data_copy.get('frontend_id')
                 
+                print(f"🔧 DEBUG: Creating question: {question_data_copy.get('text')}")
+                print(f"🔧 DEBUG: - enable_option_navigation: {enable_option_navigation}")
+                print(f"🔧 DEBUG: - option_links_data: {option_links_data}")
+                print(f"🔧 DEBUG: - option_links_data length: {len(option_links_data)}")
+                
+                # Create the question FIRST (ONLY ONCE)
                 question = Question.objects.create(
                     section=section,
-                    frontend_id=question_frontend_id,  # Store frontend ID
-                    text=question_data.get('text', ''),
-                    question_type=question_data.get('question_type', 'text'),
-                    is_required=question_data.get('is_required', False),
-                    order=question_data.get('order', 0),
-                    options=question_data.get('options', []),
+                    frontend_id=question_frontend_id,
+                    text=question_data_copy.get('text', ''),
+                    question_type=question_data_copy.get('question_type', 'text'),
+                    is_required=question_data_copy.get('is_required', False),
+                    order=question_data_copy.get('order', 0),
+                    options=question_data_copy.get('options', []),
                     enable_option_navigation=enable_option_navigation
                 )
                 
-                # Create option links for navigation if enabled
+                # THEN create option links if enabled
+                # In your create method, update this part:
                 if enable_option_navigation and option_links_data:
-                    for option_link_data in option_links_data:
+                    print(f"🔧 DEBUG: Creating {len(option_links_data)} option links for question '{question.text}'")
+                    
+                    for i, option_link_data in enumerate(option_links_data):
                         next_section_frontend_id = option_link_data.get('next_section')
                         next_section = None
                         
-                        if next_section_frontend_id:
-                            # Look up the target section using frontend ID mapping
-                            next_section = section_frontend_id_mapping.get(next_section_frontend_id)
+                        print(f"🔧 DEBUG: Option link {i+1}: text='{option_link_data.get('text')}', next_section='{next_section_frontend_id}'")
                         
-                        QuestionOption.objects.create(
+                        if next_section_frontend_id:
+                            next_section = section_frontend_id_mapping.get(next_section_frontend_id)
+                            print(f"🔧 DEBUG: - Looking up section {next_section_frontend_id} -> found: {next_section is not None}")
+                            if next_section:
+                                print(f"🔧 DEBUG: - Found section: ID {next_section.id}, frontend_id {next_section.frontend_id}")
+                        
+                        # Create the option link
+                        option_link = QuestionOption.objects.create(
                             question=question,
                             text=option_link_data.get('text', ''),
                             next_section=next_section
                         )
+                        print(f"🔧 DEBUG: - Created option link with next_section: {option_link.next_section}")
+                else:
+                    print(f"🔧 DEBUG: Skipping option links - enable_nav: {enable_option_navigation}, has_links: {bool(option_links_data)}")
             
             # Clean up temporary attribute
             if hasattr(section, '_questions_data'):
                 delattr(section, '_questions_data')
 
+        print("🔧 DEBUG: Form creation completed")
         return form
 
     def update(self, instance, validated_data):
