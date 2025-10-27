@@ -57,48 +57,7 @@ const PublicFeedbackForm: React.FC = () => {
     console.log('📊 Current answers state:', answers);
   }, [answers]);
 
-  useEffect(() => {
-    if (form) {
-      console.log('🔍 API RESPONSE DEBUG:');
-      console.log('Form data received from API:', form);
-      console.log('Sections count:', form.sections?.length);
-      console.log('All sections:', form.sections);
-      
-      // Check if there are any hidden sections or questions
-      const totalQuestions = form.sections?.reduce((count, section) => 
-        count + (section.questions?.length || 0), 0
-      ) || 0;
-      console.log('Total questions in API response:', totalQuestions);
-      
-      // Check the form structure more deeply
-      form.sections?.forEach((section, index) => {
-        console.log(`Section ${index}:`, {
-          id: section.id,
-          title: section.title,
-          questions: section.questions?.map(q => ({
-            id: q.id,
-            text: q.text,
-            required: q.is_required,
-            type: q.question_type
-          }))
-        });
-      });
-    }
-  }, [form]);
-
-  useEffect(() => {
-    if (form) {
-      console.log('✅ FINAL FORM STRUCTURE:');
-      form.sections?.forEach((section, index) => {
-        console.log(`Section ${index + 1}:`, section.title);
-        section.questions?.forEach(q => {
-          console.log(`  Q${q.id}: "${q.text}"`);
-        });
-      });
-    }
-  }, [form]);
-
-  // Function to validate and fix form data with missing question IDs
+  // FIXED: Enhanced form loading with proper data structure
   const loadForm = useCallback(async (): Promise<void> => {
     try {
       setLoading(true);
@@ -110,42 +69,42 @@ const PublicFeedbackForm: React.FC = () => {
       
       const formData = response.data;
       
-      // 🔥 CRITICAL FIX: Merge top-level questions (with IDs) with section questions
+      // CRITICAL FIX: The backend returns questions in a separate array
+      // but we need them nested within sections
       if (formData.questions && formData.sections) {
-        console.log('🔧 Merging question data...');
+        console.log('🔧 Processing form data structure...');
         
-        // Create a map of questions by text or other identifier for matching
-        const questionsWithIds = formData.questions;
-        
-        formData.sections = formData.sections.map((section: any) => {
-          if (section.questions && section.questions.length > 0) {
-            // Match section questions with top-level questions to get IDs
-            section.questions = section.questions.map((sectionQuestion: any) => {
-              // Find the matching question in the top-level array
-              const matchingQuestion = questionsWithIds.find((q: any) => 
-                q.text === sectionQuestion.text && 
-                q.question_type === sectionQuestion.question_type
-              );
-              
-              if (matchingQuestion) {
-                console.log(`✅ Matched question: "${sectionQuestion.text}" -> ID: ${matchingQuestion.id}`);
-                return {
-                  ...sectionQuestion,
-                  id: matchingQuestion.id, // Use the ID from top-level
-                  section_id: matchingQuestion.section_id
-                };
-              } else {
-                console.warn(`❌ No ID match for question: "${sectionQuestion.text}"`);
-                return sectionQuestion;
-              }
-            });
-          }
-          return section;
+        // Create a map of questions by ID for easy lookup
+        const questionsMap = new Map();
+        formData.questions.forEach((question: any) => {
+          questionsMap.set(question.id, question);
         });
+        
+        // Rebuild sections with their proper questions
+        formData.sections = formData.sections.map((section: any) => {
+          // Find questions that belong to this section
+          const sectionQuestions = formData.questions.filter((q: any) => 
+            q.section_id === section.id
+          );
+          
+          return {
+            ...section,
+            questions: sectionQuestions.map((q: any) => ({
+              ...q,
+              // Ensure option_links is always an array
+              option_links: q.option_links || [],
+              // Ensure enable_option_navigation has a default
+              enable_option_navigation: q.enable_option_navigation || false
+            }))
+          };
+        });
+        
+        // Remove the top-level questions array to avoid confusion
+        delete formData.questions;
       }
       
-      console.log('🔍 Form data after merging:', formData);
-      console.log('🔍 Section questions after merge:', formData.sections?.[0]?.questions);
+      console.log('🔍 Processed form data:', formData);
+      console.log('🔍 Section questions after processing:', formData.sections?.[0]?.questions);
       
       setForm(formData as ExtendedFeedbackForm);
       
@@ -156,6 +115,10 @@ const PublicFeedbackForm: React.FC = () => {
         sectionHistory: [0],
         nextSectionFromAnswers: null
       });
+      
+      // Reset answers when form loads
+      setAnswers({});
+      
     } catch (error: any) {
       console.error('❌ Error loading form:', error);
       setError(error.response?.data?.error || error.message || 'Failed to load form');
@@ -170,6 +133,7 @@ const PublicFeedbackForm: React.FC = () => {
     }
   }, [formId, loadForm]);
 
+  // FIXED: Proper answer state management
   const handleAnswerChange = (questionId: number, value: any): void => {
     console.log(`🔄 handleAnswerChange called:`, {
       questionId,
@@ -219,7 +183,7 @@ const PublicFeedbackForm: React.FC = () => {
     return question.option_links || [];
   };
 
-  // Calculate the next section based on current answers (option-level navigation)
+  // FIXED: Calculate option-based navigation
   const calculateNextSectionFromAnswers = (): number | null => {
     const currentSection = getCurrentSection();
     if (!currentSection || !form?.sections) return null;
@@ -231,11 +195,17 @@ const PublicFeedbackForm: React.FC = () => {
       const optionLinks = getOptionLinks(question);
       const currentAnswer = answers[question.id];
 
-      if (currentAnswer && optionLinks.length > 0) {
-        if (question.question_type === 'radio' || question.question_type === 'dropdown') {
+      if (currentAnswer && optionLinks.length > 0 && question.enable_option_navigation) {
+        console.log(`🔍 Checking navigation for question ${question.id}:`, {
+          answer: currentAnswer,
+          optionLinks,
+          options: question.options
+        });
+
+        if (question.question_type === 'radio' || question.question_type === 'dropdown' || question.question_type === 'yes_no') {
           // For single choice questions
           const selectedOptionIndex = question.options?.indexOf(currentAnswer);
-          if (selectedOptionIndex !== -1 && selectedOptionIndex !== undefined && selectedOptionIndex < optionLinks.length) {
+          if (selectedOptionIndex !== undefined && selectedOptionIndex !== -1 && selectedOptionIndex < optionLinks.length) {
             const nextSectionId = optionLinks[selectedOptionIndex].next_section;
             if (nextSectionId) {
               const targetSectionIndex = form.sections.findIndex(s => s.id === nextSectionId);
@@ -251,7 +221,7 @@ const PublicFeedbackForm: React.FC = () => {
           const selectedOptions = Array.isArray(currentAnswer) ? currentAnswer : [currentAnswer];
           for (const selectedOption of selectedOptions) {
             const selectedOptionIndex = question.options?.indexOf(selectedOption);
-            if (selectedOptionIndex !== -1 && selectedOptionIndex !== undefined && selectedOptionIndex < optionLinks.length) {
+            if (selectedOptionIndex !== undefined && selectedOptionIndex !== -1 && selectedOptionIndex < optionLinks.length) {
               const nextSectionId = optionLinks[selectedOptionIndex].next_section;
               if (nextSectionId) {
                 const targetSectionIndex = form.sections.findIndex(s => s.id === nextSectionId);
@@ -271,7 +241,7 @@ const PublicFeedbackForm: React.FC = () => {
     return nextSectionIndex;
   };
 
-  // Calculate the next section based on section-level configuration
+  // FIXED: Calculate section-based navigation
   const calculateNextSectionFromSectionConfig = (): number | null => {
     const currentSection = getCurrentSection();
     if (!currentSection || !form?.sections) return null;
@@ -289,31 +259,36 @@ const PublicFeedbackForm: React.FC = () => {
     return null;
   };
 
-  // Get the final next section considering all navigation rules
+  // FIXED: Get the final next section considering all navigation rules
   const getFinalNextSection = (): number | null => {
+    const totalSections = form?.sections?.length || 0;
+    
     // Priority 1: Option-based navigation (highest priority)
     const optionBasedNextSection = calculateNextSectionFromAnswers();
-    if (optionBasedNextSection !== null) {
+    if (optionBasedNextSection !== null && optionBasedNextSection < totalSections) {
+      console.log(`📍 Option-based navigation to section ${optionBasedNextSection + 1}`);
       return optionBasedNextSection;
     }
 
     // Priority 2: Section-based navigation
     const sectionBasedNextSection = calculateNextSectionFromSectionConfig();
-    if (sectionBasedNextSection !== null) {
+    if (sectionBasedNextSection !== null && sectionBasedNextSection < totalSections) {
+      console.log(`📍 Section-based navigation to section ${sectionBasedNextSection + 1}`);
       return sectionBasedNextSection;
     }
 
     // Priority 3: Sequential navigation (fallback)
     const sequentialNextSection = navigation.currentSectionIndex + 1;
-    if (sequentialNextSection < (form?.sections?.length || 0)) {
-      console.log(`📍 Sequential navigation: Section ${navigation.currentSectionIndex + 1} → Section ${sequentialNextSection + 1}`);
+    if (sequentialNextSection < totalSections) {
+      console.log(`📍 Sequential navigation to section ${sequentialNextSection + 1}`);
       return sequentialNextSection;
     }
 
+    console.log('📍 End of form reached');
     return null;
   };
 
-  // Navigate to next section with conditional logic
+  // FIXED: Enhanced goToNextSection function
   const goToNextSection = (): void => {
     if (!form?.sections) return;
 
@@ -321,19 +296,24 @@ const PublicFeedbackForm: React.FC = () => {
     const nextSectionIndex = getFinalNextSection();
     
     // Validate next section exists
-    if (nextSectionIndex === null || nextSectionIndex >= form.sections.length) {
-      console.log('📍 End of form reached');
+    if (nextSectionIndex === null) {
+      console.log('📍 End of form reached - should submit');
       return;
     }
 
-    if (nextSectionIndex !== navigation.currentSectionIndex) {
-      setNavigation(prev => ({
-        currentSectionIndex: nextSectionIndex,
-        visitedSections: new Set([...prev.visitedSections, nextSectionIndex]),
-        sectionHistory: [...prev.sectionHistory, nextSectionIndex],
-        nextSectionFromAnswers: null
-      }));
+    if (nextSectionIndex >= form.sections.length) {
+      console.log('❌ Invalid next section index:', nextSectionIndex);
+      return;
     }
+
+    console.log(`🔄 Navigating from section ${navigation.currentSectionIndex + 1} to ${nextSectionIndex + 1}`);
+
+    setNavigation(prev => ({
+      currentSectionIndex: nextSectionIndex,
+      visitedSections: new Set([...prev.visitedSections, nextSectionIndex]),
+      sectionHistory: [...prev.sectionHistory, nextSectionIndex],
+      nextSectionFromAnswers: null
+    }));
   };
 
   // Navigate to previous section
@@ -376,31 +356,109 @@ const PublicFeedbackForm: React.FC = () => {
   };
 
   // Check if form is complete (all visited sections are complete)
-  const isFormComplete = (): boolean => {
-    if (!form?.sections) return false;
+  // const isFormComplete = (): boolean => {
+  //   if (!form?.sections) return false;
 
-    // Check ALL sections, not just visited ones
-    for (const section of form.sections) {
-      for (const question of section.questions || []) {
-        if (question.is_required) {
-          const answer = answers[question.id];
-          if (answer === undefined || answer === '' || (Array.isArray(answer) && answer.length === 0)) {
-            console.log(`❌ Missing required question: Q${question.id} - "${question.text}"`);
-            return false;
-          }
+  //   // Check ALL sections, not just visited ones
+  //   for (const section of form.sections) {
+  //     for (const question of section.questions || []) {
+  //       if (question.is_required) {
+  //         const answer = answers[question.id];
+  //         if (answer === undefined || answer === '' || (Array.isArray(answer) && answer.length === 0)) {
+  //           console.log(`❌ Missing required question: Q${question.id} - "${question.text}"`);
+  //           return false;
+  //         }
           
-          // Validate phone numbers
-          if (question.question_type === 'phone' && answer) {
-            if (!validatePhoneNumber(answer)) {
-              console.log(`❌ Invalid phone number: Q${question.id} - "${question.text}"`);
-              return false;
-            }
+  //         // Validate phone numbers
+  //         if (question.question_type === 'phone' && answer) {
+  //           if (!validatePhoneNumber(answer)) {
+  //             console.log(`❌ Invalid phone number: Q${question.id} - "${question.text}"`);
+  //             return false;
+  //           }
+  //         }
+  //       }
+  //     }
+  //   }
+  //   return true;
+  // };
+
+  // FIXED: Only check visited sections for completion
+// const isFormComplete = (): boolean => {
+//   if (!form?.sections) return false;
+
+//   // Only check visited sections, not all sections
+//   for (const sectionIndex of Array.from(navigation.visitedSections)) {
+//     const section = form.sections[sectionIndex];
+//     if (!section) continue;
+    
+//     for (const question of section.questions || []) {
+//       if (question.is_required) {
+//         const answer = answers[question.id];
+//         if (answer === undefined || answer === '' || (Array.isArray(answer) && answer.length === 0)) {
+//           console.log(`❌ Missing required question in visited section ${sectionIndex + 1}: Q${question.id} - "${question.text}"`);
+//           return false;
+//         }
+        
+//         // Validate phone numbers
+//         if (question.question_type === 'phone' && answer) {
+//           if (!validatePhoneNumber(answer)) {
+//             console.log(`❌ Invalid phone number in visited section ${sectionIndex + 1}: Q${question.id} - "${question.text}"`);
+//             return false;
+//           }
+//         }
+//       }
+//     }
+//   }
+  
+//   console.log(`✅ All required questions in visited sections are answered`);
+//   return true;
+// };
+
+// FIXED: Only check visited sections for completion
+const isFormComplete = (): boolean => {
+  if (!form?.sections) return false;
+
+  console.log('🔍 Checking form completion for visited sections only:');
+  console.log('Visited sections:', Array.from(navigation.visitedSections).map(i => i + 1));
+
+  // Only check visited sections, not all sections
+  for (const sectionIndex of Array.from(navigation.visitedSections)) {
+    const section = form.sections[sectionIndex];
+    if (!section) {
+      console.log(`❌ Section ${sectionIndex + 1} not found`);
+      continue;
+    }
+    
+    console.log(`\n📋 Checking section ${sectionIndex + 1}: "${section.title}"`);
+    
+    for (const question of section.questions || []) {
+      if (question.is_required) {
+        const answer = answers[question.id];
+        const isAnswered = answer !== undefined && 
+                          answer !== '' && 
+                          !(Array.isArray(answer) && answer.length === 0);
+        
+        console.log(`   ${isAnswered ? '✅' : '❌'} Q${question.id}: "${question.text}" - Answer:`, answer);
+        
+        if (!isAnswered) {
+          console.log(`🚨 Missing required question in section ${sectionIndex + 1}`);
+          return false;
+        }
+        
+        // Validate phone numbers
+        if (question.question_type === 'phone' && answer) {
+          if (!validatePhoneNumber(answer)) {
+            console.log(`🚨 Invalid phone number in section ${sectionIndex + 1}`);
+            return false;
           }
         }
       }
     }
-    return true;
-  };
+  }
+  
+  console.log('✅ All required questions in visited sections are answered correctly');
+  return true;
+};
 
   // Get the display text for the next section button
   const getNextButtonText = (): string => {
@@ -463,70 +521,47 @@ const PublicFeedbackForm: React.FC = () => {
     return hints;
   };
 
-  const debugCompleteFormStructure = () => {
-    if (!form) return;
+  // Enhanced debugging for navigation
+  const debugNavigation = () => {
+    const currentSection = getCurrentSection();
+    console.log('\n🧭 NAVIGATION DEBUG:');
+    console.log('Current section:', navigation.currentSectionIndex + 1, `"${currentSection?.title}"`);
+    console.log('Visited sections:', Array.from(navigation.visitedSections).map(i => i + 1));
     
-    console.log('🏗️ COMPLETE FORM STRUCTURE DEBUG:');
-    console.log('Form ID:', form.id);
-    console.log('Form Title:', form.title);
-    console.log('Number of Sections:', form.sections?.length);
+    const optionBasedNext = calculateNextSectionFromAnswers();
+    const sectionBasedNext = calculateNextSectionFromSectionConfig();
+    const sequentialNext = navigation.currentSectionIndex + 1;
+    const finalNext = getFinalNextSection();
     
-    form.sections?.forEach((section, sectionIndex) => {
-      const isVisited = navigation.visitedSections.has(sectionIndex);
-      console.log(`\n📂 Section ${sectionIndex + 1}: "${section.title}"`);
-      console.log(`   - ID: ${section.id}`);
-      console.log(`   - Visited: ${isVisited ? '✅' : '❌'}`);
-      console.log(`   - Questions: ${section.questions?.length || 0}`);
+    console.log('Navigation calculations:');
+    console.log('  - Option-based next:', optionBasedNext !== null ? optionBasedNext + 1 : 'None');
+    console.log('  - Section-based next:', sectionBasedNext !== null ? sectionBasedNext + 1 : 'None');
+    console.log('  - Sequential next:', sequentialNext + 1);
+    console.log('  - Final next:', finalNext !== null ? finalNext + 1 : 'Submit form');
+    
+    // Debug current section's navigation rules
+    if (currentSection) {
+      console.log('Current section navigation rules:');
+      console.log('  - next_section_on_submit:', currentSection.next_section_on_submit);
       
-      section.questions?.forEach(question => {
-        const isAnswered = answers[question.id] !== undefined && 
-                          answers[question.id] !== '' && 
-                          !(Array.isArray(answers[question.id]) && answers[question.id].length === 0);
-        
-        console.log(`   ${question.is_required ? '🔴' : '⚪'} Q${question.id}: "${question.text}"`);
-        console.log(`      - Required: ${question.is_required}`);
-        console.log(`      - Type: ${question.question_type}`);
-        console.log(`      - Answered: ${isAnswered}`);
-        console.log(`      - Answer: ${answers[question.id]}`);
+      currentSection.questions?.forEach((q, qIndex) => {
+        if (q.enable_option_navigation && q.option_links?.length) {
+          console.log(`  - Question "${q.text}":`);
+          q.option_links.forEach((link, lIndex) => {
+            console.log(`    Option "${q.options?.[lIndex]}": ${link.next_section ? 'Jumps to section' : 'No jump'}`);
+          });
+        }
       });
-    });
-    
-    // Show all question IDs in the form
-    const allQuestionIds = form.sections?.flatMap(s => s.questions?.map(q => q.id) || []) || [];
-    console.log('\n🆔 ALL QUESTION IDs IN FORM:', allQuestionIds.sort((a, b) => a - b));
-    console.log('📦 QUESTIONS BEING SUBMITTED:', Object.keys(answers).map(id => parseInt(id)).sort((a, b) => a - b));
-    
-    // Find the missing question 12
-    const question12 = form.sections?.flatMap(s => s.questions || []).find(q => q.id === 12);
-    if (question12) {
-      console.log('\n🔍 FOUND MISSING QUESTION 12:');
-      console.log('   - Text:', question12.text);
-      console.log('   - Required:', question12.is_required);
-      console.log('   - Type:', question12.question_type);
-      
-      // Find which section contains question 12
-      const sectionWithQ12 = form.sections?.find(s => 
-        s.questions?.some(q => q.id === 12)
-      );
-      if (sectionWithQ12) {
-        const sectionIndex = form.sections?.indexOf(sectionWithQ12);
-        console.log('   - Located in Section:', (sectionIndex !== undefined ? sectionIndex + 1 : 'unknown'), `"${sectionWithQ12.title}"`);
-        console.log('   - Section visited:', navigation.visitedSections.has(sectionIndex || 0));
-      }
-    } else {
-      console.log('\n❌ QUESTION 12 NOT FOUND IN FORM DATA');
     }
   };
 
-  const debugNavigationState = () => {
-    console.log('\n🧭 NAVIGATION STATE:');
-    console.log('Current section index:', navigation.currentSectionIndex);
-    console.log('Visited sections:', Array.from(navigation.visitedSections));
-    console.log('Section history:', navigation.sectionHistory);
-    console.log('Total sections in form:', form?.sections?.length || 0);
-  };
+  // Call debugNavigation when navigation changes
+  useEffect(() => {
+    if (form) {
+      debugNavigation();
+    }
+  }, [navigation.currentSectionIndex, form, answers]);
 
-  // Add this debug function to check ALL questions in the form
   const debugAllFormQuestions = () => {
     if (!form) return;
     
@@ -562,8 +597,6 @@ const PublicFeedbackForm: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    debugCompleteFormStructure();
-    debugNavigationState();
     
     // Debug: Check all required questions across all visited sections
     console.log('🔍 DEBUG: Checking required questions across all visited sections:');
@@ -760,6 +793,8 @@ const PublicFeedbackForm: React.FC = () => {
           console.log(`      - Required: ${question.is_required}`);
           console.log(`      - Type: ${question.question_type}`);
           console.log(`      - Options: ${question.options?.join(', ') || 'None'}`);
+          console.log(`      - Enable Option Navigation: ${question.enable_option_navigation}`);
+          console.log(`      - Option Links:`, question.option_links);
         });
       });
       
@@ -770,13 +805,13 @@ const PublicFeedbackForm: React.FC = () => {
   }, [form]);
 
   const renderQuestionInput = (question: ExtendedQuestion): React.ReactElement => {
-    // Validate question ID
+    // Validate question ID - this is critical!
     if (!question.id || typeof question.id !== 'number') {
       console.error('❌ Question missing valid numeric ID:', question);
       return <div className="text-red-500">Error: Question missing valid ID</div>;
     }
 
-    const value = answers[question.id] || '';
+    const value = answers[question.id] || ''; // This should now be unique per question
     const optionLinks = getOptionLinks(question);
 
     console.log(`🎯 Rendering question:`, {
@@ -1274,20 +1309,20 @@ const PublicFeedbackForm: React.FC = () => {
                     {nextButtonText}
                   </button>
                 ) : (
-                  <button
-                    type="submit"
-                    disabled={!isFormComplete() || submitting}
-                    className="inline-flex items-center px-5 py-2.5 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 shadow-sm"
-                  >
-                    {submitting ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Submitting...
-                      </>
-                    ) : (
-                      'Submit Feedback'
-                    )}
-                  </button>
+                 <button
+  type="submit"
+  disabled={!isFormComplete() || submitting}  // This now only checks visited sections
+  className="inline-flex items-center px-5 py-2.5 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 shadow-sm"
+>
+  {submitting ? (
+    <>
+      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+      Submitting...
+    </>
+  ) : (
+    'Submit Feedback'
+  )}
+</button>
                 )}
               </div>
             </div>

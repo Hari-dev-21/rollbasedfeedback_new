@@ -109,21 +109,44 @@ export const formsAPI = {
   },
   
   // Update a form - WITH BETTER ERROR HANDLING
+  // updateForm: async (id: string, data: Partial<CreateFeedbackFormData>): Promise<FeedbackForm> => {
+  //   try {
+  //     const response = await api.patch(`/api/forms/${id}/`, data);
+  //     return response.data;
+  //   } catch (error: any) {
+  //     console.error(`Failed to update form ${id}:`, error);
+  //     if (error.response?.status === 404) {
+  //       throw new Error('Form not found');
+  //     }
+  //     if (error.response?.status === 403) {
+  //       throw new Error('You do not have permission to edit this form');
+  //     }
+  //     throw error;
+  //   }
+  // },
+
   updateForm: async (id: string, data: Partial<CreateFeedbackFormData>): Promise<FeedbackForm> => {
-    try {
-      const response = await api.patch(`/api/forms/${id}/`, data);
-      return response.data;
-    } catch (error: any) {
-      console.error(`Failed to update form ${id}:`, error);
-      if (error.response?.status === 404) {
-        throw new Error('Form not found');
-      }
-      if (error.response?.status === 403) {
-        throw new Error('You do not have permission to edit this form');
-      }
-      throw error;
+  try {
+    console.log('📦 Sending PATCH data:', data); // Log the outgoing data
+    const response = await api.patch(`/api/forms/${id}/`, data);
+    return response.data;
+  } catch (error: any) {
+    console.error(`Failed to update form ${id}:`, error);
+    
+    if (error.response?.status === 400) {
+      // 🔥 CRITICAL: Log the validation errors from backend
+      console.error('🔍 Validation errors:', error.response.data);
+      throw new Error(`Validation failed: ${JSON.stringify(error.response.data)}`);
     }
-  },
+    if (error.response?.status === 404) {
+      throw new Error('Form not found');
+    }
+    if (error.response?.status === 403) {
+      throw new Error('You do not have permission to edit this form');
+    }
+    throw error;
+  }
+},
   
   // Delete a form
   deleteForm: async (id: string): Promise<{ message: string }> => {

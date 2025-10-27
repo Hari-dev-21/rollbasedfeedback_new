@@ -1102,61 +1102,250 @@ useEffect(() => {
     );
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+//   const handleSubmit = async (e: React.FormEvent) => {
+//   e.preventDefault();
+  
+//   if (!formData.title.trim()) {
+//     alert('Please enter a form title');
+//     return;
+//   }
+
+//   const hasQuestions = formData.sections.some(section => section.questions.length > 0);
+//   if (!hasQuestions) {
+//     alert('Please add at least one question');
+//     return;
+//   }
+
+//   try {
+//     setLoading(true);
     
-    if (!formData.title.trim()) {
-      alert('Please enter a form title');
-      return;
-    }
+//     // const backendFormData = {
+//     //   title: formData.title.trim(),
+//     //   description: formData.description.trim(),
+//     //   form_type: formData.form_type,
+//     //   is_active: formData.is_active,
+//     //   expires_at: formData.expires_at,
+//     //   sections: formData.sections.map(section => ({
+//     //     title: section.title.trim(),
+//     //     description: section.description.trim(),
+//     //     order: section.order,
+//     //     next_section_on_submit: section.next_section_on_submit,
+//     //     questions: section.questions.map(question => ({
+//     //       text: question.text.trim(),
+//     //       question_type: question.question_type,
+//     //       is_required: question.is_required,
+//     //       order: question.order,
+//     //       options: question.options || [],
+//     //       option_links: getOptionLinks(question).map(link => ({
+//     //         text: link.text,
+//     //         next_section: link.next_section
+//     //       })),
+//     //       enable_option_navigation: getEnableOptionNavigation(question)
+//     //     }))
+//     //   }))
+//     // };
 
-    const hasQuestions = formData.sections.some(section => section.questions.length > 0);
-    if (!hasQuestions) {
-      alert('Please add at least one question');
-      return;
-    }
+//     // 🔍 DEBUG: Log what we're sending
+//    const backendFormData = {
+//   title: formData.title.trim(),
+//   description: formData.description.trim(),
+//   form_type: formData.form_type,
+//   is_active: formData.is_active,
+//   expires_at: formData.expires_at,
+//   sections: formData.sections.map(section => {
+//     // Create section data without next_section_on_submit first
+//     const sectionData: any = {
+//       title: section.title.trim(),
+//       description: section.description.trim(),
+//       order: section.order,
+//       questions: section.questions.map(question => ({
+//         text: question.text.trim(),
+//         question_type: question.question_type,
+//         is_required: question.is_required,
+//         order: question.order,
+//         options: question.options || [],
+//         option_links: getOptionLinks(question).map(link => ({
+//           text: link.text,
+//           next_section: link.next_section
+//         })),
+//         enable_option_navigation: getEnableOptionNavigation(question)
+//       }))
+//     };
 
-    try {
-      setLoading(true);
+//     // Only add next_section_on_submit if it's a valid UUID, not a string title
+//     if (section.next_section_on_submit && typeof section.next_section_on_submit === 'string') {
+//       // Check if it's a UUID format (contains hyphens and is the right length)
+//       const isUUID = section.next_section_on_submit.includes('-') && 
+//                     section.next_section_on_submit.length > 10;
       
-      const backendFormData = {
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        form_type: formData.form_type,
-        is_active: formData.is_active,
-        expires_at: formData.expires_at,
-        sections: formData.sections.map(section => ({
-          title: section.title.trim(),
-          description: section.description.trim(),
-          order: section.order,
-          next_section_on_submit: section.next_section_on_submit,
-          questions: section.questions.map(question => ({
-            text: question.text.trim(),
-            question_type: question.question_type,
-            is_required: question.is_required,
-            order: question.order,
-            options: question.options || [],
-            option_links: getOptionLinks(question).map(link => ({
-              text: link.text,
-              next_section: link.next_section
-            })),
-            enable_option_navigation: getEnableOptionNavigation(question)
-          }))
-        }))
-      };
+//       if (isUUID) {
+//         sectionData.next_section_on_submit = section.next_section_on_submit;
+//       } else {
+//         // If it's a section title string, try to find the actual section ID
+//         const targetSection = formData.sections.find(s => s.title === section.next_section_on_submit);
+//         if (targetSection?.id) {
+//           sectionData.next_section_on_submit = targetSection.id;
+//         } else {
+//           // If no matching section found, set to null
+//           sectionData.next_section_on_submit = null;
+//         }
+//       }
+//     } else if (section.next_section_on_submit && typeof section.next_section_on_submit === 'object') {
+//       // If it's an object with id property
+//       sectionData.next_section_on_submit = section.next_section_on_submit.id;
+//     } else {
+//       // For null, undefined, or other invalid values
+//       sectionData.next_section_on_submit = null;
+//     }
 
-      const updatedForm = await formsAPI.updateForm(id!, backendFormData);
-      alert(`Form "${updatedForm.title}" updated successfully!`);
-      navigate('/admin/forms');
-    } catch (error) {
-      console.error('Failed to update form:', error);
-      alert('Failed to update form. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+//     return sectionData;
+//   })
+// };
+//     console.log('📦 Sending to backend:', JSON.stringify(backendFormData, null, 2));
+
+//     const updatedForm = await formsAPI.updateForm(id!, backendFormData);
+//     alert(`Form "${updatedForm.title}" updated successfully!`);
+//     navigate('/admin/forms');
+//   } catch (error: any) {
+//     console.error('❌ Failed to update form:', error);
+    
+//     // 🔍 IMPROVED ERROR HANDLING
+//     if (error.response?.status === 400) {
+//       console.error('🔍 Backend validation errors:', error.response.data);
+//       alert(`Validation error: ${JSON.stringify(error.response.data, null, 2)}`);
+//     } else if (error.message?.includes('Validation failed')) {
+//       alert(`Validation error: ${error.message}`);
+//     } else {
+//       alert('Failed to update form. Please check the console for details.');
+//     }
+//   } finally {
+//     setLoading(false);
+//   }
+// };
 
   // Enhanced preview mode rendering
+ 
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  if (!formData.title.trim()) {
+    alert('Please enter a form title');
+    return;
+  }
+
+  const hasQuestions = formData.sections.some(section => section.questions.length > 0);
+  if (!hasQuestions) {
+    alert('Please add at least one question');
+    return;
+  }
+
+  try {
+    setLoading(true);
+    
+    // const backendFormData = {
+    //   title: formData.title.trim(),
+    //   description: formData.description.trim(),
+    //   form_type: formData.form_type,
+    //   is_active: formData.is_active,
+    //   expires_at: formData.expires_at,
+    //   sections: formData.sections.map(section => {
+    //     // Create section data
+    //     const sectionData: any = {
+    //       title: section.title.trim(),
+    //       description: section.description.trim(),
+    //       order: section.order,
+    //       questions: section.questions.map(question => ({
+    //         text: question.text.trim(),
+    //         question_type: question.question_type,
+    //         is_required: question.is_required,
+    //         order: question.order,
+    //         options: question.options || [],
+    //         option_links: getOptionLinks(question).map(link => ({
+    //           text: link.text,
+    //           next_section: link.next_section
+    //         })),
+    //         enable_option_navigation: getEnableOptionNavigation(question)
+    //       }))
+    //     };
+
+    //     // Handle next_section_on_submit - ensure it's either a valid UUID or null
+    //     if (section.next_section_on_submit) {
+    //       if (typeof section.next_section_on_submit === 'string') {
+    //         // Check if it's a UUID format (contains hyphens and is the right length)
+    //         const isUUID = section.next_section_on_submit.includes('-') && 
+    //                       section.next_section_on_submit.length > 10;
+            
+    //         if (isUUID) {
+    //           sectionData.next_section_on_submit = section.next_section_on_submit;
+    //         } else {
+    //           // If it's a section title string, try to find the actual section ID
+    //           const targetSection = formData.sections.find(s => s.title === section.next_section_on_submit);
+    //           if (targetSection?.id) {
+    //             sectionData.next_section_on_submit = targetSection.id;
+    //           } else {
+    //             // If no matching section found, set to null
+    //             sectionData.next_section_on_submit = null;
+    //           }
+    //         }
+    //       } else {
+    //         // For object types or other cases, set to null to avoid validation errors
+    //         sectionData.next_section_on_submit = null;
+    //       }
+    //     } else {
+    //       // For null, undefined, or empty values
+    //       sectionData.next_section_on_submit = null;
+    //     }
+
+    //     return sectionData;
+    //   })
+    // };
+
+    // 🔍 DEBUG: Log what we're sending
+    const backendFormData = {
+  title: formData.title.trim(),
+  description: formData.description.trim(),
+  form_type: formData.form_type,
+  is_active: formData.is_active,
+  expires_at: formData.expires_at,
+  sections: formData.sections.map(section => ({
+    title: section.title.trim(),
+    description: section.description.trim(),
+    order: section.order,
+    next_section_on_submit: null,
+    questions: section.questions.map(question => ({
+      text: question.text.trim(),
+      question_type: question.question_type,
+      is_required: question.is_required,
+      order: question.order,
+      options: question.options || [],
+      option_links: [], // Empty to test
+      enable_option_navigation: false // Disabled
+    }))
+  }))
+};
+    
+    console.log('📦 Sending to backend:', JSON.stringify(backendFormData, null, 2));
+
+    const updatedForm = await formsAPI.updateForm(id!, backendFormData);
+    alert(`Form "${updatedForm.title}" updated successfully!`);
+    navigate('/admin/forms');
+  } catch (error: any) {
+    console.error('❌ Failed to update form:', error);
+    
+    // 🔍 IMPROVED ERROR HANDLING
+    if (error.response?.status === 400) {
+      console.error('🔍 Backend validation errors:', error.response.data);
+      alert(`Validation error: ${JSON.stringify(error.response.data, null, 2)}`);
+    } else if (error.message?.includes('Validation failed')) {
+      alert(`Validation error: ${error.message}`);
+    } else {
+      alert('Failed to update form. Please check the console for details.');
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+ 
   const renderPreview = () => {
     return (
       <div className="bg-white shadow rounded-lg p-6">

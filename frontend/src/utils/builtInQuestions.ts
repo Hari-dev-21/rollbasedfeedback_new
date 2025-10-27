@@ -29,7 +29,7 @@ export const BUILT_IN_QUESTIONS: Record<string, CreateQuestionData[]> = {
     },
     {
       text: 'How likely are you to recommend us to others?',
-      question_type: 'rating_10',
+      question_type: 'rating',
       is_required: true,
       order: 1,
       options: []

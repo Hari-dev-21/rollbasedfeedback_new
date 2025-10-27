@@ -61,6 +61,7 @@ class FeedbackForm(models.Model):
 # In your models.py, add this field to the Section model
 class Section(models.Model):
     form = models.ForeignKey(FeedbackForm, on_delete=models.CASCADE, related_name='sections')
+    frontend_id = models.CharField(max_length=50, blank=True, null=True)
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     order = models.IntegerField(default=0)
@@ -96,6 +97,7 @@ class Question(models.Model):
     ]
     
     section = models.ForeignKey(Section, on_delete=models.CASCADE, related_name='questions', null= True, blank=True)
+    frontend_id = models.CharField(max_length=50, blank=True, null=True)
     text = models.CharField(max_length=500)
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPES)
     is_required = models.BooleanField(default=False)
@@ -119,6 +121,9 @@ class QuestionOption(models.Model):
         null=True, blank=True,
         related_name='incoming_options'
     )
+
+    class Meta:
+        ordering = ['id']
 
     def __str__(self):
         if self.next_section:

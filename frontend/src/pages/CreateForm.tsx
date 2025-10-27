@@ -566,58 +566,7 @@ const CreateForm: React.FC = () => {
     });
   };
 
-  // const updateQuestion = (sectionIndex: number, questionIndex: number, field: keyof CreateQuestionData, value: any) => {
-  //   const updatedSections = [...formData.sections];
-  //   const section = updatedSections[sectionIndex];
-    
-  //   section.questions[questionIndex] = {
-  //     ...section.questions[questionIndex],
-  //     [field]: value,
-  //   };
-    
-  //   if (field === 'question_type') {
-  //     // Handle special cases for different question types
-  //     if (value === 'yes_no') {
-  //       // Set default Yes/No options
-  //       section.questions[questionIndex].options = ['Yes', 'No'];
-  //       const extendedQuestion = section.questions[questionIndex] as ExtendedQuestionData;
-  //       extendedQuestion.option_links = [
-  //         { text: 'Yes', next_section: null },
-  //         { text: 'No', next_section: null }
-  //       ];
-  //       extendedQuestion.enable_option_navigation = false;
-  //     } else if (value === 'rating') {
-  //       // Set default rating options (1-5)
-  //       section.questions[questionIndex].options = ['1', '2', '3', '4', '5'];
-  //       const extendedQuestion = section.questions[questionIndex] as ExtendedQuestionData;
-  //       extendedQuestion.option_links = [
-  //         { text: '1', next_section: null },
-  //         { text: '2', next_section: null },
-  //         { text: '3', next_section: null },
-  //         { text: '4', next_section: null },
-  //         { text: '5', next_section: null }
-  //       ];
-  //       extendedQuestion.enable_option_navigation = false;
-  //     } else if (!['radio', 'checkbox', 'dropdown'].includes(value)) {
-  //       // Clear options for non-choice questions
-  //       section.questions[questionIndex].options = [];
-  //       const extendedQuestion = section.questions[questionIndex] as ExtendedQuestionData;
-  //       extendedQuestion.option_links = [];
-  //       extendedQuestion.enable_option_navigation = false;
-  //     } else {
-  //       // For choice questions, initialize with empty option_links if needed
-  //       const extendedQuestion = section.questions[questionIndex] as ExtendedQuestionData;
-  //       if (!extendedQuestion.option_links) {
-  //         extendedQuestion.option_links = [];
-  //       }
-  //     }
-  //   }
-    
-  //   setFormData({
-  //     ...formData,
-  //     sections: updatedSections,
-  //   });
-  // };
+  
 
 
   const updateQuestion = (sectionIndex: number, questionIndex: number, field: keyof CreateQuestionData, value: any) => {
@@ -982,35 +931,9 @@ const CreateForm: React.FC = () => {
 
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
+
+  debugFormData();
   
-  console.log('🎯 DEBUG: Checking dropdown questions before submission');
-  
-  // Debug: Check all dropdown questions
-  formData.sections.forEach((section, sectionIndex) => {
-    section.questions.forEach((question, questionIndex) => {
-      if (question.question_type === 'dropdown') {
-        console.log(`📊 Dropdown Question in Section ${sectionIndex + 1}:`, {
-          questionText: question.text,
-          options: question.options,
-          option_links: getOptionLinks(question),
-          enable_option_navigation: getEnableOptionNavigation(question)
-        });
-      }
-    });
-  });
-
-  // Check if any section title is empty
-  const emptySectionTitles = formData.sections.filter(section => !section.title.trim());
-  if (emptySectionTitles.length > 0) {
-    alert('Please fill in all section titles before submitting the form.');
-    return;
-  }
-
-  if (!formData.title.trim()) {
-    alert('Please enter a form title');
-    return;
-  }
-
   try {
     setLoading(true);
     
@@ -1021,63 +944,65 @@ const handleSubmit = async (e: React.FormEvent) => {
       is_active: formData.is_active,
       expires_at: formData.expires_at,
       sections: formData.sections.map(section => ({
+        frontend_id: section.id,
         title: section.title.trim(),
         description: section.description.trim(),
         order: section.order,
         next_section_on_submit: section.next_section_on_submit,
         questions: section.questions.map(question => {
-          // Special handling for dropdown questions
+          const extendedQuestion = question as ExtendedQuestionData;
+          
           const questionData: any = {
+            frontend_id: question.id, // Add this line - use question.id as frontend_id
             text: question.text.trim(),
             question_type: question.question_type,
             is_required: question.is_required,
             order: question.order,
             options: question.options || [],
-            enable_option_navigation: getEnableOptionNavigation(question)
+            enable_option_navigation: extendedQuestion.enable_option_navigation || false,
+            option_links: []
           };
           
           // Only include option_links if enable_option_navigation is true
-          if (getEnableOptionNavigation(question)) {
-            questionData.option_links = getOptionLinks(question).map(link => ({
+          if (extendedQuestion.enable_option_navigation) {
+            questionData.option_links = (extendedQuestion.option_links || []).map(link => ({
               text: link.text,
               next_section: link.next_section
             }));
-          } else {
-            questionData.option_links = [];
           }
           
-          console.log(`✅ Processed question: ${question.text}`, questionData);
+          console.log(`✅ Processed question: ${question.text}`, {
+            frontend_id: questionData.frontend_id, // Should now show the ID
+            enable_option_navigation: questionData.enable_option_navigation,
+            option_links: questionData.option_links
+          });
+          
           return questionData;
         })
       }))
     };
 
-    console.log('📤 FINAL DATA BEING SENT TO API:');
+    console.log('📤 FINAL DATA BEING SENT TO API (With frontend_id):');
     console.log(JSON.stringify(backendFormData, null, 2));
 
     const createdForm = await formsAPI.createForm(backendFormData);
-    alert(`Form "${createdForm.title}" created successfully!`);
+    alert(`Form "${createdForm.title}" created successfully with navigation!`);
     navigate('/admin/forms');
   } catch (error: any) {
     console.error('❌ FAILED TO CREATE FORM:');
-    console.error('Error details:', error);
+    console.error('Full error object:', error);
     
     if (error.response?.data) {
-      console.error('🔍 SERVER VALIDATION ERRORS:', error.response.data);
+      console.error('🔍 SERVER RESPONSE DATA:', error.response.data);
+      console.error('🔍 SERVER STATUS:', error.response.status);
       
-      // Show specific error message
-      if (error.response.data.sections) {
-        const sectionErrors = error.response.data.sections;
-        sectionErrors.forEach((error: any, index: number) => {
-          if (error.questions) {
-            error.questions.forEach((qError: any, qIndex: number) => {
-              console.error(`Section ${index + 1}, Question ${qIndex + 1} errors:`, qError);
-            });
-          }
-        });
+      if (error.response.data.details) {
+        console.error('🔍 VALIDATION DETAILS:', error.response.data.details);
+        alert(`Validation error details: ${JSON.stringify(error.response.data.details)}`);
+      } else {
+        console.error('🔍 FULL RESPONSE DATA:', JSON.stringify(error.response.data, null, 2));
+        alert(`Validation error: ${JSON.stringify(error.response.data)}`);
       }
-      
-      alert(`Validation error: ${JSON.stringify(error.response.data)}`);
     } else {
       alert('Failed to create form. Please try again.');
     }
@@ -1086,59 +1011,31 @@ const handleSubmit = async (e: React.FormEvent) => {
   }
 };
 
-  // const handleSubmit = async (e: React.FormEvent) => {
-  //   e.preventDefault();
+// Add this debug function to check your form data before submission
+const debugFormData = () => {
+  console.log('🔍 DEBUG FORM DATA BEFORE SUBMISSION:');
+  
+  formData.sections.forEach((section, sectionIndex) => {
+    console.log(`\n📂 Section ${sectionIndex + 1}: "${section.title}"`);
+    console.log('   - ID:', section.id);
+    console.log('   - next_section_on_submit:', section.next_section_on_submit);
     
-  //   if (!formData.title.trim()) {
-  //     alert('Please enter a form title');
-  //     return;
-  //   }
-
-  //   const hasQuestions = formData.sections.some(section => section.questions.length > 0);
-  //   if (!hasQuestions) {
-  //     alert('Please add at least one question');
-  //     return;
-  //   }
-
-  //   try {
-  //     setLoading(true);
+    section.questions.forEach((question, questionIndex) => {
+      const extendedQuestion = question as ExtendedQuestionData;
+      console.log(`\n   ❓ Question ${questionIndex + 1}: "${question.text}"`);
+      console.log('      - enable_option_navigation:', extendedQuestion.enable_option_navigation);
+      console.log('      - option_links:', extendedQuestion.option_links);
       
-  //     const backendFormData = {
-  //       title: formData.title.trim(),
-  //       description: formData.description.trim(),
-  //       form_type: formData.form_type,
-  //       is_active: formData.is_active,
-  //       expires_at: formData.expires_at,
-  //       sections: formData.sections.map(section => ({
-  //         title: section.title.trim(),
-  //         description: section.description.trim(),
-  //         order: section.order,
-  //         next_section_on_submit: section.next_section_on_submit,
-  //         questions: section.questions.map(question => ({
-  //           text: question.text.trim(),
-  //           question_type: question.question_type,
-  //           is_required: question.is_required,
-  //           order: question.order,
-  //           options: question.options || [],
-  //           option_links: getOptionLinks(question).map(link => ({
-  //             text: link.text,
-  //             next_section: link.next_section
-  //           })),
-  //           enable_option_navigation: getEnableOptionNavigation(question)
-  //         }))
-  //       }))
-  //     };
+      if (extendedQuestion.enable_option_navigation && extendedQuestion.option_links) {
+        extendedQuestion.option_links.forEach((link, linkIndex) => {
+          console.log(`      - Option ${linkIndex + 1}: "${link.text}" → ${link.next_section}`);
+        });
+      }
+    });
+  });
+};
 
-  //     const createdForm = await formsAPI.createForm(backendFormData);
-  //     alert(`Form "${createdForm.title}" created successfully!`);
-  //     navigate('/admin/forms');
-  //   } catch (error: any) {
-  //     console.error('Failed to create form:', error);
-  //     alert('Failed to create form. Please try again.');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
+// Call this in your handleSubmit before sending data
 
   // Enhanced preview mode rendering
   const renderPreview = () => {
